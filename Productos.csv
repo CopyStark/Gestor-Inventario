@@ -1,0 +1,4 @@
+﻿Codigo;Nombre;Categoria;Stock_Inicial;Stock_Actual;Stock_Minimo;Fecha_Entrada;Fecha_Vencimiento;Estado (Vencimiento);Estado (Stock);Precio_Unitario
+1;Leche Entera;Lacteos;50;42;10;25-09-2025;02-10-2025;VENCIDO;OPTIMO;1200
+2;Pan Baguette;Panaderia;11;1;5;27-09-2025;28-09-2025;VENCIDO;CRITICO;800
+3;Coca Cola 1.5L;Bebidas;100;115;20;17-09-2025;26-12-2025;OK;OPTIMO;1500
