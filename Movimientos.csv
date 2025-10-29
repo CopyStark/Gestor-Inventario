@@ -1,6 +1,10 @@
-﻿Fecha;Codigo_Producto;Tipo;Cantidad;Responsable
+Fecha;Codigo_Producto;Tipo;Cantidad;Responsable
 27-09-2025;1;Salida;5;Vendedor1
 27-09-2025;2;Salida;10;Vendedor2
 27-09-2025;3;Entrada;20;Proveedor
 27-09-2025;1;Salida;3;Vendedor1
 27-09-2025;3;Salida;5;Vendedor1
+29-10-2025;3;Entrada;2;Vendedor3
+29-10-2025;3;Entrada;10;Vendedor1
+29-10-2025;3;Salida;10;Vendedor1
+29-10-2025;3;Entrada;10;Vendedor1
