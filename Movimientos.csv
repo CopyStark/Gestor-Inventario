@@ -1,4 +1,4 @@
-Fecha;Codigo_Producto;Tipo;Cantidad;Responsable
+﻿Fecha;Codigo_Producto;Tipo;Cantidad;Responsable;Motivo
 27-09-2025;1;Salida;5;Vendedor1
 27-09-2025;2;Salida;10;Vendedor2
 27-09-2025;3;Entrada;20;Proveedor
