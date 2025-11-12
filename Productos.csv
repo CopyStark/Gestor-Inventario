@@ -1,8 +1,5 @@
-﻿Categoria;Codigo;Descripcion;Estado (Stock);Estado (Vencimiento);Fecha_Entrada;Fecha_Vencimiento;Nombre;Precio_Unitario;Stock_Actual;Stock_Inicial;Stock_Minimo
-Lacteos;1;;🟢 ÓPTIMO;🔴 VENCIDO;09-11-2025;02-10-2025;Leche Entera;1200;47;50;10
-Panaderia;2;;🔴 CRÍTICO;🔴 VENCIDO;27-09-2025;28-09-2025;Pan Baguette;800;1;11;5
-Bebidas;3;;🟢 ÓPTIMO;🟢 OK;29-10-2025;26-12-2025;Coca Cola 1.5L;1500;127;100;20
-Lacteos;4;;🟢 ÓPTIMO;⚪ N/A;08-11-2025;;Westcol;1000;23;23;5
-Carton;5;;🟡 ADVERTENCIA;🔴 VENCIDO;08-11-2025;08-11-2025;carton;1;1;1;1
-Dulces;6;barra de chocolate de 100g o algo así no c;🟢 ÓPTIMO;🔴 VENCIDO;09-11-2025;08-11-2025;chocolate;1200;20;20;4
-Dulces;7;gomitas verdes de menta;;;09-11-2025;09-11-2025;Gomitas;400;13;13;1
+﻿Categoria;Codigo;Descripcion;Estado (Stock);Estado (Vencimiento);Fecha_Entrada;Fecha_Vencimiento;Nombre;Precio_Venta;Stock_Actual;Stock_Inicial;Stock_Minimo;Costo;Stock_Viejo_Restante;Fecha_Vencimiento_Pendiente
+Lacteos;1;;🔴 CRITICO;🟢 OK;12-11-2025;15-12-2025;Yogurt Batido Frutilla;500;9;5;10;200;2.0;30-12-2025
+Abarrotes;2;Pasta seca marca genérica;🟢 OPTIMO;🔴 VENCIDO;12-11-2025;12-10-2025;Fideos Espirales 400g;950;30;30;10;600;;
+Snacks;3;Bolsa mediana 150g;🟢 OPTIMO;🟢 OK;12-11-2025;15-01-2026;Papas Fritas Corte Americano;2200;20;20;8;1300;;
+Panaderia;4;Bolsa familiar, 20 rebanadas;;;12-11-2025;29-11-2025;Pan de Molde Integral;2800;4;4;5;1800;;

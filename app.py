@@ -10,8 +10,7 @@ st.set_page_config(layout="wide", page_title="Gestor de Inventario")
 
 def load_data():
     """
-    Carga todos los archivos CSV (Productos, Movimientos, Usuarios).
-    Maneja la creacion de archivos/columnas si no existen.
+    Carga archivos y prepara columnas para logica FEFO automatica (Stock Viejo y Fecha Pendiente).
     """
     try:
         df_productos = pd.read_csv("Productos.csv", sep=";")
@@ -20,7 +19,6 @@ def load_data():
         st.error("Error: No se encontraron los archivos 'Productos.csv' o 'Movimientos.csv'.")
         return None, None, None
     
-    # Cargar usuarios o crear archivo por defecto
     try:
         df_usuarios = pd.read_csv("usuarios.csv", sep=";")
     except FileNotFoundError:
@@ -33,15 +31,38 @@ def load_data():
         df_movimientos["Motivo"] = ""
     df_movimientos["Motivo"] = df_movimientos["Motivo"].fillna("")
     
-    # Limpiar nombres de columnas
     df_productos.columns = df_productos.columns.str.strip()
     df_movimientos.columns = df_movimientos.columns.str.strip()
     df_usuarios.columns = df_usuarios.columns.str.strip()
     
-    # Conversion de Fechas
+    # --- MIGRACION DE COLUMNAS ---
+    if "Precio_Unitario" in df_productos.columns and "Precio_Venta" not in df_productos.columns:
+        df_productos = df_productos.rename(columns={"Precio_Unitario": "Precio_Venta"})
+    elif "Precio_Venta" not in df_productos.columns:
+        df_productos["Precio_Venta"] = 0 
+
+    if "Costo" not in df_productos.columns:
+        df_productos["Costo"] = 0
+    
+    # --- NUEVO: Columnas para FEFO Automatico ---
+    if "Stock_Viejo_Restante" not in df_productos.columns:
+        df_productos["Stock_Viejo_Restante"] = 0
+    
+    if "Fecha_Vencimiento_Pendiente" not in df_productos.columns:
+        df_productos["Fecha_Vencimiento_Pendiente"] = pd.NaT # Fecha vacia por defecto
+
+    # Rellenar vacios
+    df_productos["Costo"] = df_productos["Costo"].fillna(0)
+    df_productos["Precio_Venta"] = df_productos["Precio_Venta"].fillna(0)
+    df_productos["Stock_Viejo_Restante"] = df_productos["Stock_Viejo_Restante"].fillna(0)
+    # --- FIN NUEVO ---
+
     try:
         df_productos["Fecha_Entrada"] = pd.to_datetime(df_productos["Fecha_Entrada"], dayfirst=True, errors='coerce').dt.normalize()
         df_productos["Fecha_Vencimiento"] = pd.to_datetime(df_productos["Fecha_Vencimiento"], dayfirst=True, errors='coerce').dt.normalize()
+        # --- NUEVO: Convertir fecha pendiente ---
+        df_productos["Fecha_Vencimiento_Pendiente"] = pd.to_datetime(df_productos["Fecha_Vencimiento_Pendiente"], dayfirst=True, errors='coerce').dt.normalize()
+        
         df_movimientos["Fecha"] = pd.to_datetime(df_movimientos["Fecha"], dayfirst=True, errors='coerce').dt.normalize()
     except KeyError as e:
         st.error(f"Error: Falta una columna de fecha esencial: {e}")
@@ -55,7 +76,7 @@ def load_data():
 
 def save_data(df_productos, df_movimientos):
     """
-    Guarda los DataFrames de vuelta a CSV.
+    Guarda los DataFrames de vuelta a CSV, incluyendo las nuevas columnas FEFO.
     """
     date_format_string = "%d-%m-%Y"
     
@@ -63,7 +84,14 @@ def save_data(df_productos, df_movimientos):
     df_mov_save = df_movimientos.copy()
 
     df_prod_save["Fecha_Entrada"] = df_prod_save["Fecha_Entrada"].dt.strftime(date_format_string)
+    
+    # Formatear Fecha Vencimiento Principal
     df_prod_save["Fecha_Vencimiento"] = df_prod_save["Fecha_Vencimiento"].apply(
+        lambda x: x.strftime(date_format_string) if pd.notnull(x) else ""
+    )
+    
+    # --- NUEVO: Formatear Fecha Pendiente ---
+    df_prod_save["Fecha_Vencimiento_Pendiente"] = df_prod_save["Fecha_Vencimiento_Pendiente"].apply(
         lambda x: x.strftime(date_format_string) if pd.notnull(x) else ""
     )
     
@@ -146,7 +174,8 @@ def mostrar_inventario(df_productos):
                  column_config={
                      "Fecha_Entrada": st.column_config.DateColumn("Fecha Entrada", format="DD-MM-YYYY"),
                      "Fecha_Vencimiento": st.column_config.DateColumn("Fecha Vencimiento", format="DD-MM-YYYY"),
-                     "Precio_Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %d")
+                     "Precio_Venta": st.column_config.NumberColumn("Precio Venta", format="$ %d"),
+                     "Costo": st.column_config.NumberColumn("Costo", format="$ %d")
                  })
 
 def registrar_movimiento(df_productos, df_movimientos, product_map_name_to_id, product_map_id_to_name):
@@ -182,6 +211,10 @@ def registrar_movimiento(df_productos, df_movimientos, product_map_name_to_id, p
                 motivo = ""
                 if st.session_state.tipo_movimiento == "Ajuste":
                     motivo = st.text_input("Motivo del Ajuste:", placeholder="Ej: Merma por rotura")
+                
+                fecha_vencimiento_nueva = None
+                if st.session_state.tipo_movimiento == "Entrada":
+                    fecha_vencimiento_nueva = st.date_input("Vencimiento del Nuevo Lote:", datetime.now())
 
             submitted = st.form_submit_button("Registrar Movimiento")
 
@@ -197,22 +230,81 @@ def registrar_movimiento(df_productos, df_movimientos, product_map_name_to_id, p
                 fecha_actual = pd.to_datetime(datetime.now().date())
                 
                 idx = df_productos.index[df_productos['Codigo'] == codigo_producto].tolist()[0]
+                
                 stock_actual = df_productos.at[idx, 'Stock_Actual']
+                fecha_venc_actual = df_productos.at[idx, 'Fecha_Vencimiento']
+                stock_viejo_restante = df_productos.at[idx, 'Stock_Viejo_Restante']
+                fecha_venc_pendiente = df_productos.at[idx, 'Fecha_Vencimiento_Pendiente']
                 
                 nuevo_stock = stock_actual
+                mensaje_extra = "" 
                 
+                # --- LOGICA DE MOVIMIENTOS ---
                 if tipo_movimiento == "Salida":
                     if cantidad > stock_actual:
                         st.error(f"Error: No hay stock suficiente. Stock actual: {stock_actual}")
                         return 
+                    
                     nuevo_stock = stock_actual - cantidad
+                    
+                    # Logica FEFO Salida
+                    if stock_viejo_restante > 0:
+                        stock_viejo_restante -= cantidad
+                        st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = max(0, stock_viejo_restante)
+                        
+                        if stock_viejo_restante <= 0 and pd.notnull(fecha_venc_pendiente):
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento'] = fecha_venc_pendiente
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento_Pendiente'] = pd.NaT
+                            st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = 0
+                            
+                            nueva_fecha_str = fecha_venc_pendiente.strftime('%d-%m-%Y')
+                            mensaje_extra = f"🎉 ¡Se termino el lote antiguo! La fecha de vencimiento se actualizo automaticamente a: {nueva_fecha_str}"
                 
                 elif tipo_movimiento == "Entrada":
                     nuevo_stock = stock_actual + cantidad
                     st.session_state.df_productos.at[idx, 'Fecha_Entrada'] = fecha_actual
+                    
+                    fecha_nueva_dt = pd.to_datetime(fecha_vencimiento_nueva).normalize()
+                    
+                    if stock_actual <= 0 or pd.isna(fecha_venc_actual):
+                        st.session_state.df_productos.at[idx, 'Fecha_Vencimiento'] = fecha_nueva_dt
+                        st.session_state.df_productos.at[idx, 'Fecha_Vencimiento_Pendiente'] = pd.NaT
+                        st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = 0
+                        mensaje_extra = "Stock estaba en 0. Fecha de vencimiento actualizada."
+                    else:
+                        if fecha_venc_actual <= fecha_nueva_dt:
+                            st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = stock_actual
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento_Pendiente'] = fecha_nueva_dt
+                            
+                            fecha_fmt = fecha_venc_actual.strftime('%d-%m-%Y')
+                            mensaje_extra = f"⚠️ Se mantiene fecha antigua ({fecha_fmt}). El sistema recordara cambiarla cuando vendas las {stock_actual} unidades viejas."
+                        else:
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento'] = fecha_nueva_dt
+                            mensaje_extra = "⚠️ La nueva entrada vence antes que lo que tenias. Se actualizo la fecha principal."
                 
                 elif tipo_movimiento == "Ajuste":
                     nuevo_stock = stock_actual + cantidad 
+                    
+                    # --- CORRECCIÓN: LOGICA FEFO PARA AJUSTES ---
+                    # Si hay un lote antiguo activo, el ajuste impacta primero ahi
+                    if stock_viejo_restante > 0:
+                        # Aplicamos el ajuste al contador del lote viejo
+                        # (Si cantidad es +1, suma; si es -1, resta)
+                        stock_viejo_restante += cantidad
+                        
+                        # Guardamos, asegurando que no sea negativo
+                        nuevo_remanente = max(0, stock_viejo_restante)
+                        st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = nuevo_remanente
+                        
+                        # Si el ajuste consumio el lote viejo (o lo dejo en 0)
+                        if nuevo_remanente == 0 and pd.notnull(fecha_venc_pendiente):
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento'] = fecha_venc_pendiente
+                            st.session_state.df_productos.at[idx, 'Fecha_Vencimiento_Pendiente'] = pd.NaT
+                            st.session_state.df_productos.at[idx, 'Stock_Viejo_Restante'] = 0
+                            
+                            nueva_fecha_str = fecha_venc_pendiente.strftime('%d-%m-%Y')
+                            mensaje_extra = f"ℹ️ El ajuste afecto al lote antiguo y este se termino. Fecha actualizada a: {nueva_fecha_str}"
+                    # --- FIN CORRECCIÓN ---
 
                 with st.spinner("Registrando y guardando..."):
                     st.session_state.df_productos.at[idx, 'Stock_Actual'] = nuevo_stock
@@ -232,10 +324,14 @@ def registrar_movimiento(df_productos, df_movimientos, product_map_name_to_id, p
                     )
                     
                     save_data(st.session_state.df_productos, st.session_state.df_movimientos)
-                    st.success(f"¡Movimiento '{tipo_movimiento}' de {cantidad} unidad(es) registrado!")
+                    
+                    st.success(f"¡Movimiento '{tipo_movimiento}' de {cantidad} unidad(es) registrado! Stock Nuevo: {nuevo_stock}.")
+                    if mensaje_extra:
+                        st.info(mensaje_extra)
+                        
                     st.session_state.df_productos = update_statuses(st.session_state.df_productos)
-                    time.sleep(1)
-                    st.rerun()
+                    
+                    st.button("✖️ Cerrar Notificacion y Limpiar")
 
     st.divider()
     st.header("Historial de Movimientos")
@@ -293,13 +389,17 @@ def anadir_nuevo_producto(df_productos):
         nombre = st.text_input("Nombre del Producto:")
         descripcion = st.text_area("Descripcion (Opcional):", placeholder="Ej: Leche entera de 1 litro, marca...")
         
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
+        c1, c2 = st.columns(2)
+        with c1:
             stock_inicial = st.number_input("Stock Inicial:", min_value=0, step=1)
-        with col_s2:
+        with c2:
             stock_minimo = st.number_input("Stock Minimo:", min_value=0, step=1)
-        with col_s3:
-            precio_unitario = st.number_input("Precio Unitario:", min_value=0, step=1)
+            
+        c3, c4 = st.columns(2)
+        with c3:
+            costo = st.number_input("Costo:", min_value=0, step=1)
+        with c4:
+            precio_venta = st.number_input("Precio de Venta:", min_value=0, step=1)
         
         fecha_vencimiento = None
         if sin_vencimiento:
@@ -310,12 +410,17 @@ def anadir_nuevo_producto(df_productos):
         submitted = st.form_submit_button("Anadir Producto")
 
     if submitted:
+        # --- CORRECCION: Validacion insensible a mayusculas ---
         if not nombre:
             col_form.warning("El campo 'Nombre del Producto' no puede estar vacio.")
             return
-        elif nombre in df_productos["Nombre"].values:
-            col_form.warning("Error: Ya existe un producto con ese nombre.")
+        
+        # Creamos listas en minusculas para comparar
+        nombres_existentes = df_productos["Nombre"].astype(str).str.strip().str.lower().values
+        if nombre.strip().lower() in nombres_existentes:
+            col_form.warning(f"Error: Ya existe un producto con el nombre '{nombre}'.")
             return
+        # --- FIN CORRECCION ---
 
         categoria_final = ""
         if st.session_state.widget_cat_select == opcion_nueva:
@@ -354,15 +459,17 @@ def anadir_nuevo_producto(df_productos):
                     "Stock_Minimo": [stock_minimo],
                     "Fecha_Entrada": [fecha_entrada],
                     "Fecha_Vencimiento": [fecha_venc_final],
-                    "Precio_Unitario": [precio_unitario]
+                    "Costo": [costo],
+                    "Precio_Venta": [precio_venta]
                 })
                 
-                st.session_state.df_productos, nuevo_producto = st.session_state.df_productos.align(nuevo_producto, join='outer', axis=1, fill_value="")
-                
+                # --- CORRECCION CRITICA: Eliminado .fillna(0) ---
+                # Esto evita que las fechas vacias se conviertan en el numero 0 y causen el error
                 st.session_state.df_productos = pd.concat(
                     [st.session_state.df_productos, nuevo_producto],
                     ignore_index=True
-                ).fillna("") 
+                )
+                # --- FIN CORRECCION ---
                 
                 save_data(st.session_state.df_productos, st.session_state.df_movimientos)
                 
@@ -435,9 +542,25 @@ def gestionar_productos(df_productos):
             
         with st.form("editar_producto_form"):
             descripcion_actual = producto_data.get("Descripcion", "")
-            descripcion = st.text_area("Descripcion (Opcional):", value=descripcion_actual)
-            stock_minimo = st.number_input("Stock Minimo:", min_value=0, step=1, value=int(producto_data["Stock_Minimo"]))
-            precio_unitario = st.number_input("Precio Unitario:", min_value=0, step=1, value=int(producto_data["Precio_Unitario"]))
+            descripcion = st.text_area("Descripcion (Opcional):", value=str(descripcion_actual))
+            
+            costo_actual = int(producto_data.get("Costo", 0))
+            precio_venta_actual = int(producto_data.get("Precio_Venta", 0))
+            stock_minimo_actual = int(producto_data.get("Stock_Minimo", 0))
+
+            # --- CAMBIO DE DISEÑO: Stocks ---
+            # Nota: En editar no mostramos Stock Inicial/Actual porque se manejan por movimientos
+            # Solo mostramos Stock Minimo, asi que lo dejamos solo o con los precios
+            
+            # Opcion A: Stock Minimo arriba solo, Precios abajo
+            stock_minimo = st.number_input("Stock Minimo:", min_value=0, step=1, value=stock_minimo_actual)
+            
+            # --- CAMBIO DE DISEÑO: Precios en una fila ---
+            c1, c2 = st.columns(2)
+            with c1:
+                costo = st.number_input("Costo:", min_value=0, step=1, value=costo_actual)
+            with c2:
+                precio_venta = st.number_input("Precio de Venta:", min_value=0, step=1, value=precio_venta_actual)
             
             submitted_edit = st.form_submit_button("Guardar Cambios")
 
@@ -463,7 +586,8 @@ def gestionar_productos(df_productos):
                 st.session_state.df_productos.at[idx, "Descripcion"] = descripcion
                 st.session_state.df_productos.at[idx, "Categoria"] = categoria_final
                 st.session_state.df_productos.at[idx, "Stock_Minimo"] = stock_minimo
-                st.session_state.df_productos.at[idx, "Precio_Unitario"] = precio_unitario
+                st.session_state.df_productos.at[idx, "Costo"] = costo
+                st.session_state.df_productos.at[idx, "Precio_Venta"] = precio_venta
                 
                 save_data(st.session_state.df_productos, st.session_state.df_movimientos)
                 st.success(f"¡Producto '{nombre_producto}' actualizado con exito!")
@@ -561,7 +685,6 @@ if 'data_loaded' in st.session_state:
             if 'page' not in st.session_state or st.session_state.page not in menu_options:
                 st.session_state.page = "Inventario Actual"
             
-            # --- ARREGLO DOBLE CLIC ---
             def update_page_state():
                 st.session_state.page = st.session_state.menu_radio
             
@@ -574,7 +697,6 @@ if 'data_loaded' in st.session_state:
                 key="menu_radio", 
                 on_change=update_page_state
             )
-            # --- FIN ARREGLO ---
             
             st.divider()
             
